@@ -1,0 +1,312 @@
+---
+title: "Transcriptomics analysis of old mice"
+author: "Júlia Faura"
+output: html_document
+---
+
+Paquets a instal·lar
+
+```{r}
+#install.packages("knitr")
+#install.packages("colorspace")
+#install.packages("gplots")
+#install.packages("ggplot2")
+#install.packages("ggrepel")
+#install.packages("htmlTable")
+#install.packages("prettydoc")
+#install.packages("devtools")
+#install.packages("BiocManager")
+#BiocManager::install("oligo")
+#BiocManager::install("pd.clariom.s.mouse.ht")
+#BiocManager::install("arrayQualityMetrics")
+#BiocManager::install("pvca")
+#BiocManager::install("limma")
+#BiocManager::install("genefilter")
+#BiocManager::install("clariomsmousehttranscriptcluster.db")
+#BiocManager::install("annotate")
+#BiocManager::install("org.Mm.eg.db")
+#BiocManager::install("ReactomePA")
+#BiocManager::install("reactome.db")
+library(oligo)
+library(Biobase)
+library(arrayQualityMetrics)
+library(ggplot2)
+library(ggrepel)
+library(genefilter)
+library(clariomsmousehttranscriptcluster.db)
+library(limma)
+library(gplots)
+library(org.Mm.eg.db)
+```
+
+Directoris
+
+```{r}
+setwd("E:/Dades crues Multi-Bio-Targets/Old")
+workingDir <-getwd()
+dataDir <-file.path(workingDir, "data")
+resultsDir <- file.path(workingDir,"results")
+celfilesDir <- file.path(workingDir,"celfiles")
+```
+
+Càrrega dels arxius .cel
+
+```{r}
+celFiles_old <- list.celfiles(celfilesDir, full.names = TRUE)
+my.targets_old <-read.AnnotatedDataFrame(file.path(dataDir,"targets_old.txt"),
+                                     header = TRUE, row.names = 1, sep="\t") 
+rawData_old <- read.celfiles(celFiles_old, phenoData = my.targets_old)
+my.targets_old@data$ShortName->rownames(pData(rawData_old))
+colnames(rawData_old) <-rownames(pData(rawData_old)) 
+
+head(rawData_old)
+```
+
+QA
+
+```{r, eval=FALSE}
+arrayQualityMetrics(rawData_old)
+```
+
+PCA dades crues
+
+```{r}
+plotPCA3 <- function (datos, labels, factor, title, scale,colores, size = 1.5, glineas = 0.25) {
+   data <- prcomp(t(datos),scale=scale)
+   # plot adjustments
+   dataDf <- data.frame(data$x)
+   Group <- factor
+   loads <- round(data$sdev^2/sum(data$sdev^2)*100,1)
+   # main plot
+   p1 <- ggplot(dataDf,aes(x=PC1, y=PC2)) +
+     theme_classic() +
+     geom_hline(yintercept = 0, color = "gray70") +
+     geom_vline(xintercept = 0, color = "gray70") +
+     geom_point(aes(color = Group), alpha = 0.55, size = 3) +
+     coord_cartesian(xlim = c(min(data$x[,1])-5,max(data$x[,1])+5)) +
+     scale_fill_discrete(name = "Group")
+   # avoiding labels superposition
+   p1 + geom_text_repel(aes(y = PC2 + 0.25, label = labels),segment.size = 0.25, size = size) + 
+     labs(x = c(paste("PC1",loads[1],"%")),y=c(paste("PC2",loads[2],"%"))) +  
+     ggtitle(paste("Principal Component Analysis for: ",title,sep=" "))+ 
+     theme(plot.title = element_text(hjust = 0.5)) +
+     scale_color_manual(values=colores)
+}
+
+targets_old <- read.table(file.path(dataDir,"targets_old.txt"), header=TRUE, sep="\t")
+pdf("pca_rawdata_old.pdf")
+plotPCA3(exprs(rawData_old), labels = targets_old$ShortName, factor = targets_old$Group, 
+         title="Raw data", scale = FALSE, size = 3, 
+         colores = c("darkgreen", "lightgreen", "darkblue", "lightblue"))
+dev.off()
+```
+
+Boxplot dades crues
+
+```{r}
+pdf("boxplot_rawdata_old.pdf")
+boxplot(rawData_old, cex.axis=0.5, las=2,  which="all", 
+        main="Distribution of raw intensity values", labels=targets_old$ShortName)
+dev.off()
+```
+
+Normalització
+
+```{r}
+eset_rma_old <- rma(rawData_old)
+```
+
+QA dades normalitzades
+
+```{r, eval=FALSE}
+arrayQualityMetrics(eset_rma_old, outdir = file.path(resultsDir, "QCDir.Norm"), force=TRUE)
+```
+
+PCA dades normalitzades
+
+```{r}
+pdf("pca_normdata_old.pdf")
+plotPCA3(exprs(eset_rma_old), labels = targets_old$ShortName, factor = targets_old$Group, 
+         title="Raw data", scale = FALSE, size = 3, 
+         colores = c("darkgreen", "lightgreen", "darkblue", "lightblue"))
+dev.off()
+```
+
+Boxplot dades normalitzades
+
+```{r}
+pdf("boxplot_normdata_old.pdf")
+boxplot(eset_rma_old, cex.axis=0.5, las=2,  which="all", 
+        main="Boxplot for arrays intensity: Normalized Data", labels=targets_old$ShortName)
+dev.off()
+```
+
+Filtrat
+
+```{r}
+png("filtered.png")
+sds <- apply (exprs(eset_rma_old), 1, sd)
+sdsO<- sort(sds)
+plot(1:length(sdsO), sdsO, main="Global variation over all genes")
+dev.off()
+```
+
+Anotació
+
+```{r}
+annotation(eset_rma_old) <- "clariomsmousehttranscriptcluster.db"
+filtered_old <- nsFilter(eset_rma_old, 
+                     require.entrez = TRUE, remove.dupEntrez = TRUE,
+                     var.filter=TRUE, var.func=IQR, var.cutoff=0.75, 
+                      filterByQuantile=TRUE, feature.exclude = "^AFFX")
+print(filtered_old$filter.log)
+eset_filtered_old <-filtered_old$eset
+```
+
+Guardar les dades
+
+```{r}
+write.csv(exprs(eset_rma_old), file.path(resultsDir, "normalized.Data.old.csv"))
+write.csv(exprs(eset_filtered_old), file.path(resultsDir, "normalized.Filtered.Data.old.csv"))
+
+```
+
+Creació de la matriu de disseny
+
+```{r}
+designMat_old<- model.matrix(~0+Group+Mouse, pData(eset_filtered_old))
+print(designMat_old)
+```
+
+Creació de la matriu de contrastos
+
+```{r}
+cont.matrix_old <- makeContrasts (SHAM.o=(GroupSHAM.IP-GroupSHAM.CL), MCAO.o =(GroupMCAO.IP-GroupMCAO.CL),
+                              levels=designMat_old)
+print(cont.matrix_old)
+
+```
+
+Generació del model
+
+```{r}
+fit_old<-lmFit(eset_filtered_old, designMat_old)
+fit.main_old<-contrasts.fit(fit_old, cont.matrix_old)
+fit.main_old<-eBayes(fit.main_old)
+class(fit.main_old)
+```
+
+Creació de les top table
+
+```{r}
+topTab_MCAO.o <- topTable (fit.main_old, number=nrow(fit.main_old), coef="MCAO.o", adjust="fdr") 
+head(topTab_MCAO.o)
+
+topTab_SHAM.o <- topTable (fit.main_old, number=nrow(fit.main_old), coef="SHAM.o", adjust="fdr") 
+head(topTab_SHAM.o)
+
+```
+
+Anotació de les top tables
+
+```{r}
+annotatedTopTable <- function(topTab, anotPackage)
+{
+   topTab <- cbind(PROBEID=rownames(topTab), topTab)
+   myProbes <- rownames(topTab)
+   thePackage <- eval(parse(text = anotPackage))
+   geneAnots <- select(thePackage, myProbes, c("SYMBOL", "ENTREZID", "GENENAME"))
+   annotatedTopTab<- merge(x=geneAnots, y=topTab, by.x="PROBEID", by.y="PROBEID")
+   return(annotatedTopTab)
+}
+
+topAnnotated_MCAO.o <- annotatedTopTable(topTab_MCAO.o,
+                                            anotPackage="clariomsmousehttranscriptcluster.db")
+topAnnotated_SHAM.o <- annotatedTopTable(topTab_SHAM.o,
+                                      anotPackage="clariomsmousehttranscriptcluster.db")
+
+
+write.csv(topAnnotated_MCAO.o, file.path(resultsDir, "topAnnotated_MCAO.o.csv"))
+write.csv(topAnnotated_SHAM.o, file.path(resultsDir, "topAnnotated_SHAM.o.csv"))
+
+```
+
+GSEA
+
+```{r}
+#BiocManager::install("clusterProfiler")
+#BiocManager::install("pathview")
+#BiocManager::install("enrichplot")
+#BiocManager::install("DO.db")
+library(clusterProfiler)
+library(enrichplot)
+library(ggplot2)
+library(ggnewscale)
+```
+
+```{r}
+gsea_list_old <- read.csv("E:/Dades crues Multi-Bio-Targets/Old/gsea_list_old.csv", header=TRUE, sep=",")
+genelist_old <- gsea_list_old$logFC
+names(genelist_old) <- gsea_list_old$SYMBOL
+gsea_old_go <- gseGO(geneList=genelist_old, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = org.Mm.eg.db, 
+             pAdjustMethod = "fdr")
+```
+
+```{r}
+pdf("dotplot_old_gsea_go.pdf")
+dotplot(gsea_old_go, showCategory=10, split=".sign") + facet_grid(.~.sign)
+dev.off()
+x2_old <- pairwise_termsim(gsea_old_go)
+pdf("emapplot_old_gsea_go.pdf")
+emapplot(x2_old, showCategory=30, color="p.adjust")
+dev.off()
+pdf("cnetplot_old_gsea_go.pdf")
+cnetplot(gsea_old_go, categorySize="pvalue", foldChange=genelist_old, showCategory = 3)
+dev.off()
+```
+
+Multiple comparisons
+
+```{r}
+res<-decideTests(fit.main_old, method="separate", adjust.method="none", p.value=0.05)
+sum.res.rows<-apply(abs(res),1,sum)
+res.selected<-res[sum.res.rows!=0,] 
+print(summary(res))
+```
+
+Heatmap
+
+```{r}
+require(gplots)
+data=read.csv("E:/Dades crues Multi-Bio-Targets/Old/MCAO_heatmap_old.csv", header=TRUE, sep=",")
+rnames <- data[,1]                                               
+mat_data <- data.matrix(data[,2:ncol(data)])                
+rownames(mat_data) <- rnames
+dim(data)
+
+
+
+pdf("heatmap_old.pdf", width=6, height=6)
+heatmap.2(mat_data,
+          Rowv = FALSE,
+          Colv = FALSE,
+          main = "Male",
+          scale = "row",
+          col = heat.colors (40,1),                    
+          sepcolor = "white",
+          key = TRUE,
+          keysize = 1.5,                       
+          cexCol = 0.9,                       
+          density.info = "histogram",
+          ColSideColors = c(rep("darkgreen",8), rep("lightgreen",8)),          
+          tracecol = NULL,
+          srtCol = 50)
+dev.off()
+```

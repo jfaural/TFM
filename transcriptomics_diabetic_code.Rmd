@@ -1,0 +1,313 @@
+---
+title: "Transcriptomics analysis of diabetic mice"
+author: "Júlia Faura"
+output: html_document
+---
+
+Paquets a instal·lar
+
+```{r}
+#install.packages("knitr")
+#install.packages("colorspace")
+#install.packages("gplots")
+#install.packages("ggplot2")
+#install.packages("ggrepel")
+#install.packages("htmlTable")
+#install.packages("prettydoc")
+#install.packages("devtools")
+#install.packages("BiocManager")
+#BiocManager::install("oligo")
+#BiocManager::install("pd.clariom.s.mouse.ht")
+#BiocManager::install("arrayQualityMetrics")
+#BiocManager::install("pvca")
+#BiocManager::install("limma")
+#BiocManager::install("genefilter")
+#BiocManager::install("clariomsmousehttranscriptcluster.db")
+#BiocManager::install("annotate")
+#BiocManager::install("org.Mm.eg.db")
+#BiocManager::install("ReactomePA")
+#BiocManager::install("reactome.db")
+library(oligo)
+library(Biobase)
+library(arrayQualityMetrics)
+library(ggplot2)
+library(ggrepel)
+library(genefilter)
+library(clariomsmousehttranscriptcluster.db)
+library(limma)
+library(gplots)
+library(org.Mm.eg.db)
+```
+
+Directoris
+
+```{r}
+setwd("E:/Dades crues Multi-Bio-Targets/Diabetic")
+workingDir <-getwd()
+dataDir <-file.path(workingDir, "data")
+resultsDir <- file.path(workingDir,"results")
+celfilesDir <- file.path(workingDir,"celfiles")
+```
+
+Càrrega dels arxius .cel
+
+```{r}
+celFiles_diab <- list.celfiles(celfilesDir, full.names = TRUE)
+my.targets_diab <-read.AnnotatedDataFrame(file.path(dataDir,"targets_diabetics.txt"),
+                                     header = TRUE, row.names = 1, sep="\t") 
+rawData_diab <- read.celfiles(celFiles_diab, phenoData = my.targets_diab)
+my.targets_diab@data$ShortName->rownames(pData(rawData_diab))
+colnames(rawData_diab) <-rownames(pData(rawData_diab)) 
+
+head(rawData_diab)
+```
+
+QA
+
+```{r, eval=FALSE}
+arrayQualityMetrics(rawData_diab)
+```
+
+PCA dades crues
+
+```{r}
+plotPCA3 <- function (datos, labels, factor, title, scale,colores, size = 1.5, glineas = 0.25) {
+   data <- prcomp(t(datos),scale=scale)
+   # plot adjustments
+   dataDf <- data.frame(data$x)
+   Group <- factor
+   loads <- round(data$sdev^2/sum(data$sdev^2)*100,1)
+   # main plot
+   p1 <- ggplot(dataDf,aes(x=PC1, y=PC2)) +
+     theme_classic() +
+     geom_hline(yintercept = 0, color = "gray70") +
+     geom_vline(xintercept = 0, color = "gray70") +
+     geom_point(aes(color = Group), alpha = 0.55, size = 3) +
+     coord_cartesian(xlim = c(min(data$x[,1])-5,max(data$x[,1])+5)) +
+     scale_fill_discrete(name = "Group")
+   # avoiding labels superposition
+   p1 + geom_text_repel(aes(y = PC2 + 0.25, label = labels),segment.size = 0.25, size = size) + 
+     labs(x = c(paste("PC1",loads[1],"%")),y=c(paste("PC2",loads[2],"%"))) +  
+     ggtitle(paste("Principal Component Analysis for: ",title,sep=" "))+ 
+     theme(plot.title = element_text(hjust = 0.5)) +
+     scale_color_manual(values=colores)
+}
+
+targets_diabetics <- read.table(file.path(dataDir,"targets_diabetics.txt"), header=TRUE, sep="\t")
+pdf("pca_raw_diab.pdf")
+plotPCA3(exprs(rawData_diab), labels = targets_diabetics$ShortName, factor = targets_diabetics$Group, 
+         title="Raw data", scale = FALSE, size = 3, 
+         colores = c("darkgreen", "lightgreen", "darkblue", "lightblue"))
+dev.off()
+```
+
+Boxplot dades crues
+
+```{r}
+pdf("boxplot_raw_diab.pdf")
+boxplot(rawData_diab, cex.axis=0.5, las=2,  which="all", 
+        main="Distribution of raw intensity values", names=targets_diabetics$Sho)
+dev.off()
+```
+
+Normalització
+
+```{r}
+eset_rma_diab <- rma(rawData_diab)
+```
+
+QA dades normalitzades
+
+```{r, eval=FALSE}
+arrayQualityMetrics(eset_rma_diab, outdir = file.path(resultsDir, "QCDir.Norm"), force=TRUE)
+```
+
+PCA dades normalitzades
+
+```{r}
+pdf("pca_norm_diab.pdf")
+plotPCA3(exprs(eset_rma_diab), labels = targets_diabetics$ShortName, factor = targets_diabetics$Group, 
+         title="Norm data", scale = FALSE, size = 3, 
+         colores = c("darkgreen", "lightgreen", "darkblue", "lightblue"))
+dev.off()
+```
+
+Boxplot dades normalitzades
+
+```{r}
+pdf("boxplot_norm_diab.pdf")
+boxplot(eset_rma_diab, cex.axis=0.5, las=2,  which="all", 
+        main="Boxplot for arrays intensity: Normalized Data", names=targets_diabetics$ShortName)
+dev.off()
+```
+
+Filtrat
+
+```{r}
+png("filtered_diab.png")
+sds <- apply (exprs(eset_rma_diab), 1, sd)
+sdsO<- sort(sds)
+plot(1:length(sdsO), sdsO, main="Global variation over all genes")
+dev.off()
+```
+
+Anotació
+
+```{r}
+annotation(eset_rma_diab) <- "clariomsmousehttranscriptcluster.db"
+filtered_diab <- nsFilter(eset_rma_diab, 
+                     require.entrez = TRUE, remove.dupEntrez = TRUE,
+                     var.filter=TRUE, var.func=IQR, var.cutoff=0.75, 
+                      filterByQuantile=TRUE, feature.exclude = "^AFFX")
+print(filtered_diab$filter.log)
+eset_filtered_diab <-filtered_diab$eset
+```
+
+Guardar les dades
+
+```{r}
+write.csv(exprs(eset_rma_diab), file.path(resultsDir, "normalized.Data.Diab.csv"))
+write.csv(exprs(eset_filtered_diab), file.path(resultsDir, "normalized.Filtered.Data.Diab.csv"))
+
+```
+
+Creació de la matriu de disseny
+
+```{r}
+designMat_diab<- model.matrix(~0+Group+Mouse, pData(eset_filtered_diab))
+print(designMat_diab)
+```
+
+Creació de la matriu de contrastos
+
+```{r}
+cont.matrix_diab <- makeContrasts (SHAM.d=(GroupSHAM.IP-GroupSHAM.CL), MCAO.d =(GroupMCAO.IP-GroupMCAO.CL),
+                              levels=designMat_diab)
+print(cont.matrix_diab)
+
+```
+
+Generació del model
+
+```{r}
+fit_diab<-lmFit(eset_filtered_diab, designMat_diab)
+fit.main_diab<-contrasts.fit(fit_diab, cont.matrix_diab)
+fit.main_diab<-eBayes(fit.main_diab)
+class(fit.main_diab)
+```
+
+Creació de les top tables
+
+```{r}
+topTab_MCAO.d <- topTable (fit.main_diab, number=nrow(fit.main_diab), coef="MCAO.d", adjust="fdr") 
+head(topTab_MCAO.d)
+
+topTab_SHAM.d <- topTable (fit.main_diab, number=nrow(fit.main_diab), coef="SHAM.d", adjust="fdr") 
+head(topTab_SHAM.d)
+
+```
+
+Anotació de les top tables
+
+```{r}
+annotatedTopTable <- function(topTab, anotPackage)
+{
+   topTab <- cbind(PROBEID=rownames(topTab), topTab)
+   myProbes <- rownames(topTab)
+   thePackage <- eval(parse(text = anotPackage))
+   geneAnots <- select(thePackage, myProbes, c("SYMBOL", "ENTREZID", "GENENAME"))
+   annotatedTopTab<- merge(x=geneAnots, y=topTab, by.x="PROBEID", by.y="PROBEID")
+   return(annotatedTopTab)
+}
+
+topAnnotated_MCAO.d <- annotatedTopTable(topTab_MCAO.d,
+                                            anotPackage="clariomsmousehttranscriptcluster.db")
+topAnnotated_SHAM.d <- annotatedTopTable(topTab_SHAM.d,
+                                      anotPackage="clariomsmousehttranscriptcluster.db")
+
+
+write.csv(topAnnotated_MCAO.d, file.path(resultsDir, "topAnnotated_MCAO.d.csv"))
+write.csv(topAnnotated_SHAM.d, file.path(resultsDir, "topAnnotated_SHAM.d.csv"))
+```
+
+GSEA
+
+```{r}
+#BiocManager::install("clusterProfiler")
+#BiocManager::install("pathview")
+#BiocManager::install("enrichplot")
+#BiocManager::install("DO.db")
+library(clusterProfiler)
+library(enrichplot)
+library(ggplot2)
+library(ggnewscale)
+```
+
+```{r}
+gsea_list_diabetic <- read.csv("E:/Dades crues Multi-Bio-Targets/Diabetic/gsea_list_diabetic.csv", header=TRUE, sep=",")
+genelist_diabetic <- gsea_list_diabetic$logFC
+names(genelist_diabetic) <- gsea_list_diabetic$SYMBOL
+gsea_diabetic_go <- gseGO(geneList=genelist_diabetic, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = org.Mm.eg.db, 
+             pAdjustMethod = "fdr")
+```
+
+```{r}
+pdf("dotplot_diabetic_gsea_go.pdf")
+dotplot(gsea_diabetic_go, showCategory=10, split=".sign") + facet_grid(.~.sign)
+dev.off()
+x2_diabetic <- pairwise_termsim(gsea_diabetic_go)
+pdf("emapplot_diabetic_gsea_go.pdf")
+emapplot(x2_diabetic, showCategory=30, color="p.adjust")
+dev.off()
+pdf("cnetplot_diabetic_gsea_go.pdf")
+cnetplot(gsea_diabetic_go, categorySize="pvalue", foldChange=genelist_diabetic, showCategory = 3)
+dev.off()
+```
+
+
+Multiple comparisons
+
+```{r}
+res<-decideTests(fit.main_diabetic, method="separate", adjust.method="none", p.value=0.05)
+sum.res.rows<-apply(abs(res),1,sum)
+res.selected<-res[sum.res.rows!=0,] 
+print(summary(res))
+```
+
+
+Heatmap
+
+```{r}
+require(gplots)
+data=read.csv("E:/Dades crues Multi-Bio-Targets/Diabetic/MCAO_heatmap_diab.csv", header=TRUE, sep=",")
+rnames <- data[,1]                                               
+mat_data <- data.matrix(data[,2:ncol(data)])                
+rownames(mat_data) <- rnames
+dim(data)
+
+
+
+pdf("heatmap_diabetic.pdf", width=6, height=6)
+heatmap.2(mat_data,
+          Rowv = FALSE,
+          Colv = FALSE,
+          main = "Male",
+          scale = "row",
+          col = heat.colors (40,1),                    
+          sepcolor = "white",
+          key = TRUE,
+          keysize = 1.5,                       
+          cexCol = 0.9,                       
+          density.info = "histogram",
+          ColSideColors = c(rep("darkgreen",8), rep("lightgreen",8)),          
+          tracecol = NULL,
+          srtCol = 50)
+dev.off()
+```

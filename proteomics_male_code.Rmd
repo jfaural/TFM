@@ -1,0 +1,247 @@
+---
+title: "Proteomics analysis"
+author: "Júlia Faura"
+output: html_document
+---
+
+Paquets a instal·lar
+
+```{r}
+#install.packages("knitr")
+#install.packages("colorspace")
+#install.packages("gplots")
+#install.packages("ggplot2")
+#install.packages("ggrepel")
+#install.packages("htmlTable")
+#install.packages("prettydoc")
+#install.packages("devtools")
+#install.packages("BiocManager")
+#BiocManager::install("oligo")
+#BiocManager::install("pd.clariom.s.mouse.ht")
+#BiocManager::install("arrayQualityMetrics")
+#BiocManager::install("pvca")
+#BiocManager::install("limma")
+#BiocManager::install("genefilter")
+#BiocManager::install("clariomsmousehttranscriptcluster.db")
+#BiocManager::install("annotate")
+#BiocManager::install("org.Mm.eg.db")
+#BiocManager::install("ReactomePA")
+#BiocManager::install("reactome.db")
+library(org.Mm.eg.db)
+library(ggplot2)
+library(ggrepel)
+library(limma)
+library(gplots)
+```
+
+Directoris
+
+```{r}
+setwd("E:/Dades crues Multi-Bio-Targets/proteomics")
+workingDir <-getwd()
+```
+
+Càrrega arxius
+
+```{r}
+rawData_prot <- read.delim("E:/Dades crues Multi-Bio-Targets/proteomics/rawdata_male_mod.txt", header = TRUE, sep = "\t")
+rownames(rawData_prot) <- make.names(rawData_prot[,1], unique = TRUE)
+rawData_prot[,1] <- NULL
+targets <- read.delim("E:/Dades crues Multi-Bio-Targets/proteomics/targets male proteòmica.txt", header = TRUE, sep = "\t")
+raw_data_noinf <- rawData_prot[!is.infinite(rowSums(rawData_prot)),]
+raw_data_noinf <- raw_data_noinf[-c(2486,2487,2488,2489,2490,2491,2492,2493,2494), ]
+```
+
+PCA dades crues
+
+```{r}
+plotPCA3 <- function (datos, labels, factor, title, scale,colores, size = 1.5, glineas = 0.25) {
+   data <- prcomp(t(datos),scale=scale)
+   # plot adjustments
+   dataDf <- data.frame(data$x)
+   Group <- factor
+   loads <- round(data$sdev^2/sum(data$sdev^2)*100,1)
+   # main plot
+   p1 <- ggplot(dataDf,aes(x=PC1, y=PC2)) +
+     theme_classic() +
+     geom_hline(yintercept = 0, color = "gray70") +
+     geom_vline(xintercept = 0, color = "gray70") +
+     geom_point(aes(color = Group), alpha = 0.55, size = 3) +
+     coord_cartesian(xlim = c(min(data$x[,1])-5,max(data$x[,1])+5)) +
+     scale_fill_discrete(name = "Group")
+   # avoiding labels superposition
+   p1 + geom_text_repel(aes(y = PC2 + 0.25, label = labels),segment.size = 0.25, size = size) + 
+     labs(x = c(paste("PC1",loads[1],"%")),y=c(paste("PC2",loads[2],"%"))) +  
+     ggtitle(paste("Principal Component Analysis for: ",title,sep=" "))+ 
+     theme(plot.title = element_text(hjust = 0.5)) +
+     scale_color_manual(values=colores)
+}
+
+
+pdf("pca_rawdata_proteomics.pdf")
+plotPCA3(raw_data_noinf, labels = targets$SampleID, factor = targets$Group, 
+         title="Raw data", scale = FALSE, size = 3, 
+         colores = c("darkgreen", "lightgreen", "darkblue", "lightblue"))
+dev.off()
+```
+
+Boxplot dades crues
+
+```{r}
+pdf("boxplot_rawdata_proteomics.pdf")
+boxplot(rawData_prot, cex.axis=0.5, las=2,  which="all", 
+        main="Distribution of raw intensity values", names=targets$SampleID)
+dev.off()
+```
+
+Normalització de les dades
+
+```{r}
+raw_data_norm <- (raw_data_noinf)+10
+raw_data_norm <- log10(raw_data_norm)
+raw_data_scale <- scale(raw_data_norm, center=TRUE, scale=FALSE)
+```
+
+
+PCA dades normalitzades
+
+```{r}
+pdf("pca_normdata_proteomics.pdf")
+plotPCA3(raw_data_scale, labels = targets$SampleID, factor = targets$Group, 
+         title="Norm data", scale = FALSE, size = 3, 
+         colores = c("darkgreen", "lightgreen", "darkblue", "lightblue"))
+dev.off()
+```
+
+
+Boxplot dades normalitzades
+
+```{r}
+pdf("boxplot_normdata_proteomics.pdf")
+boxplot(raw_data_scale, cex.axis=0.5, las=2,  which="all", 
+        main="Distribution of norm intensity values", names=targets$SampleID)
+dev.off()
+```
+
+Creació de la matriu de disseny
+
+```{r}
+designMat_prot<- model.matrix(~0+Group+Mouse, targets)
+print(designMat_prot)
+```
+
+Creació de la matriu de contrastos
+
+```{r}
+cont.matrix_prot <- makeContrasts (SHAM.prot=(GroupSHAM.IP-GroupSHAM.CL), MCAO.prot =(GroupMCAO.IP-GroupMCAO.CL),
+                              levels=designMat_prot)
+print(cont.matrix_prot)
+
+```
+
+Generació del model
+
+```{r}
+fit_prot<-lmFit(raw_data_scale, designMat_prot)
+fit.main_prot<-contrasts.fit(fit_prot, cont.matrix_prot)
+fit.main_prot<-eBayes(fit.main_prot)
+class(fit.main_prot)
+```
+
+Creació de les top tables
+
+```{r}
+topTab_MCAO.p <- topTable (fit.main_prot, number=nrow(fit.main_prot), coef="MCAO.prot", adjust="fdr") 
+head(topTab_MCAO.p)
+
+topTab_SHAM.p <- topTable (fit.main_prot, number=nrow(fit.main_prot), coef="SHAM.prot", adjust="fdr") 
+head(topTab_SHAM.p)
+
+```
+
+Guardar les top tables
+
+```{r}
+write.csv(topTab_MCAO.p, "E:/Dades crues Multi-Bio-Targets/proteomics/toptable_MCAO.p.csv")
+write.csv(topTab_SHAM.p, "E:/Dades crues Multi-Bio-Targets/proteomics/toptable_SHAM.p.csv")
+write.csv(raw_data_scale, "E:/Dades crues Multi-Bio-Targets/proteomics/norm_data_proteomics.csv")
+```
+ 
+Amb Excel, s'han comparat les llistes i s'han eliminat aquelles proteïnes significatives comuns (p-valor cru<0.05) amb una diferència de logFC<0.05. La resta d'anàlisis s'ha realitzat amb aquesta nova toptable.
+
+
+GSEA
+
+```{r}
+#BiocManager::install("clusterProfiler")
+#BiocManager::install("pathview")
+#BiocManager::install("enrichplot")
+#BiocManager::install("DO.db")
+library(clusterProfiler)
+library(enrichplot)
+library(ggplot2)
+library(ggnewscale)
+```
+
+S'ha creat amb Excel un llistat amb totes les proteïnes i el seu respectiu logFC, ordenats de manera descendent.
+
+```{r}
+gsea_list_male_prot <- read.csv("E:/Dades crues Multi-Bio-Targets/proteomics male/gsea_proteomics_male.csv", header=TRUE, sep=",")
+genelist_male_prot <- gsea_list_male_prot$logFC
+names(genelist_male_prot) <- gsea_list_male_prot$SYMBOL
+gsea_male_go_prot <- gseGO(geneList=genelist_male_prot, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.9, 
+             verbose = TRUE, 
+             OrgDb = org.Mm.eg.db, 
+             pAdjustMethod = "fdr")
+```
+
+```{r}
+pdf("dotplot_male_gsea_go_prot.pdf")
+dotplot(gsea_male_go_prot, showCategory=10, split=".sign") + facet_grid(.~.sign)
+dev.off()
+x2_prot <- pairwise_termsim(gsea_male_go_prot)
+pdf("emapplot_male_gsea_go.pdf")
+emapplot(x2_prot, showCategory=30, color="p.adjust")
+dev.off()
+pdf("cnetplot_male_gsea_go.pdf")
+cnetplot(gsea_male_go_prot, categorySize="pvalue", foldChange=genelist_male_prot, showCategory = 3)
+dev.off()
+```
+
+
+Heatmap. 
+Es crea amb Excel la matriu de dades normalitzades d'aquelles proteïnes significatives (p-valor cru<0.05), i això és el que es puja.
+
+
+```{r}
+require(gplots)
+data=read.csv("E:/Dades crues Multi-Bio-Targets/proteomics male/MCAO_heatmap_prot.csv", header=TRUE, sep=",")
+rnames <- data[,1]                                               
+mat_data <- data.matrix(data[,2:ncol(data)])                
+rownames(mat_data) <- rnames
+dim(data)
+
+
+
+pdf("heatmap_old.pdf", width=6, height=6)
+heatmap.2(mat_data,
+          Rowv = FALSE,
+          Colv = FALSE,
+          main = "Male",
+          scale = "row",
+          col = heat.colors (40,1),                    
+          sepcolor = "white",
+          key = TRUE,
+          keysize = 1.5,                       
+          cexCol = 0.9,                       
+          density.info = "histogram",
+          ColSideColors = c(rep("darkgreen",8), rep("lightgreen",8)),          
+          tracecol = NULL,
+          srtCol = 50)
+dev.off()
+```

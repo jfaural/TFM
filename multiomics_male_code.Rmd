@@ -1,0 +1,199 @@
+---
+title: "Anàlisi integratiu de les dades"
+author: "Júlia Faura"
+output: html_document
+---
+
+### Molècules comuns
+
+Es comparen les top tables en les que s'hi han restat aquelles molècules comuns en els animals shams.
+
+Primer s'anoten les proteïnes (Uniprot a Gene Symbol). Es crea amb Excel un arxiu amb els noms de totes les proteïnes.
+
+```{r}
+prots <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/TT final proteomics_int.csv", header=TRUE, sep=";")
+rownames(prots) <- prots$X
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+AnnotationDbi::keytypes(org.Mm.eg.db)
+
+symbols_prots <- AnnotationDbi::mapIds(org.Mm.eg.db,
+                                            keys = rownames(prots), keytype = "UNIPROT",
+                                            column = c("SYMBOL"))
+na.symbols <- which(is.na(symbols_prots))
+prots_symbol <- cbind(prots, symbols_prots)
+
+write.csv(prots_symbol, "E:/Dades crues Multi-Bio-Targets/Integromics/TT_proteomics_symbol.csv")
+```
+
+S'anoten manualment aquelles proteïnes que no s'han pogut anotar. Es puja l'arxiu.
+Es compara si hi ha molècules comuns.
+
+```{r}
+prots_symbol_man <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/TT_proteomics_symbol_manually_sign.csv", header=TRUE, sep=";")
+genes_symbol <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/TT final male_gens_int.csv", header=TRUE, sep=";")
+
+protsymb <- prots_symbol_man$symbolsFromUniprot
+genesymb <- genes_symbol$SYMBOL
+common_molecules <- intersect(protsymb, genesymb)
+length(common_molecules)
+```
+
+Diagrama de Venn. Es puja un arxiu creat amb Excel amb dues columnes, on hi ha cadascun dels noms dels dos anàlisis (proteòmica i transcriptòmica).
+
+```{r}
+base_01 <- read.delim(file.choose(), header = TRUE, sep = "\t")
+A <- base_01$SYMBOL
+B <- base_01$symbols_prot
+B <- B[-c(2486:5071)]
+
+a1=length(A)
+b1=length(B)
+
+ab=intersect(A, B)
+ab1=length(ab)
+
+pdf()
+draw.pairwise.venn(a1, b1, ab1, fill = c("skyblue", "pink1"), lty = "blank", title="raw p-value<0.05")
+dev.off()
+```
+
+
+### Preparació matriu proteïnes
+
+Anotació de les proteïnes (Uniprot --> SYMBOL).
+
+```{r}
+prots_all <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/TT_MCAO_all_prot.csv", header=TRUE, sep=",")
+prots_all$X <- substr(prots_all$X, 1, 6)  
+rownames(prots_all) <- prots_all$X
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+AnnotationDbi::keytypes(org.Mm.eg.db)
+
+symbols_prot <- AnnotationDbi::mapIds(org.Mm.eg.db,
+                                            keys = rownames(prots_all), keytype = "UNIPROT",
+                                            column = c("SYMBOL"))
+na.symbols_a <- which(is.na(symbols_prot))
+prots_symbol_all <- cbind(prots_all, symbols_prot)
+
+write.csv(prots_symbol_all, "E:/Dades crues Multi-Bio-Targets/Integromics/TT_proteomics_symbol_all.csv")
+```
+
+S'anoten manualment aquelles proteïnes que no s'han anotat prèviament (93).
+També ens assegurem que la matriu de proteïnes i la de gens tinguin el mateix ordre de les mostres.
+La resta de l'anàlisi integratiu es realitzarà amb les mostres dels animals isquèmics.
+
+## MCIA
+
+Es fa l'anàlisi i es generen els gràfics. 
+
+```{r}
+#BiocManager::install("omicade4")
+library(omicade4)
+
+GENES_mat <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/GENS_matrix.csv", header=TRUE, sep=",")
+rownames(GENES_mat) <- GENES_mat$SYMBOL
+GENES_mat <- GENES_mat[,-1]
+PROTS_mat <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/proteomics.csv", header=TRUE, sep=",")
+rownames(PROTS_mat) <- PROTS_mat$symbols_prot
+PROTS_mat <- PROTS_mat[,-1]
+
+data.list <- list(GENES_mat, PROTS_mat)
+
+sapply(data.list, dim)
+
+mcia_male <- mcia(data.list, cia.nf = 2, cia.scan = FALSE, nsc = T, svd = TRUE)
+
+plot(mcia_male, axes = 1:2,
+     sample.lab = TRUE, sample.legend = TRUE, sample.color = 2,
+     phenovec = NULL, df.color = 2,
+     df.pch = NA, gene.nlab = 5)
+```
+
+Se seleccionen les 100 variables amb més pes al primer component de cada dataset per fer un ORA.
+
+```{r}
+plotVar(mcia_male)
+select_mol100 <- topVar(mcia_male, axis=1, end="both", topN=100)
+write.csv(select_mol100, "E:/Dades crues Multi-Bio-Targets/Integromics/selected_molecules_mcia100.csv")
+```
+
+S'utilitza el Gprofiler per fer l'ORA. Pugem el background, que es crea amb Excel i són totes les molècules analitzades tant en la transcriptòmica i proteòmica..
+
+```{r}
+background <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/background_nodupl.csv", header=FALSE, sep=",")
+selected_mol_column_100 <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/selected_molecules_mcia100_column.csv", header=FALSE, sep=",")
+```
+
+
+```{r}
+install.packages("gprofiler2")
+library(gprofiler2)
+
+selected_mol_column_100_vec <- selected_mol_column_100$V1
+gprof_100 <- gost(selected_mol_column_100_vec, organism="mmusculus", correction_method="fdr", domain_scope="custom", custom_bg=background_vec, source=c("GO:BP", "KEGG"), user_threshold = 0.5)
+gostplot(gprof_100)
+```
+
+## multiGSEA
+
+```{r}
+BiocManager::install(version='devel')
+BiocManager::install("multiGSEA")
+library(org.Mm.eg.db)
+library(multiGSEA)
+library(magrittr)
+```
+
+Pugem les dades, creem amb excel els llistats rankejats amb p-valor i logFC.
+
+```{r}
+transcriptome <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/multigsea_transcriptomics.csv", header=TRUE, sep=",")
+proteome <- read.csv("E:/Dades crues Multi-Bio-Targets/Integromics/multigsea_proteomics.csv", header=TRUE, sep=",")
+```
+
+```{r}
+omics_data <- initOmicsDataStructure( layer = c("transcriptome", 
+                                                "proteome"))
+omics_data$transcriptome <- rankFeatures(transcriptome$logFC, 
+                                         transcriptome$P.Value)
+names(omics_data$transcriptome) <- transcriptome$SYMBOL
+omics_data$proteome <- rankFeatures(proteome$logFC, proteome$P.Value)
+names(omics_data$proteome) <- proteome$SYMBOL
+
+omics_short <- lapply(names(omics_data), function(name){ 
+  head(omics_data[[name]])
+})
+names(omics_short) <- names(omics_data)
+omics_short
+```
+
+Descarreguem les pathways de les bases de dades.
+
+```{r}
+layers <- names(omics_data)
+pathways <- getMultiOmicsFeatures(layer = layers,
+                                   returnTranscriptome = "SYMBOL",
+                                   returnProteome = "SYMBOL",
+                                  organism="mmusculus",
+                                   useLocal = FALSE)
+```
+
+Fem l'anàlisi.
+
+```{r}
+enrichment_scores <- multiGSEA(pathways, omics_data)
+df <- extractPvalues(enrichmentScores = enrichment_scores,
+                      pathwayNames = names(pathways[[1]]))
+
+df$combined_pval <- combinePvalues(df)
+df$combined_padj <- p.adjust(df$combined_pval, method = "BH")
+
+df <- cbind(data.frame( pathway = names(pathways[[1]])), df)
+df2 <- df[order(df$combined_pval),]
+head(df2)
+write.csv(df2, "E:/Dades crues Multi-Bio-Targets/Integromics/resultats multiGSEA.csv")
+
+```
+

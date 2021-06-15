@@ -1,0 +1,153 @@
+---
+title: "Diagrames de Venn"
+author: "Júlia Faura"
+date: "15/6/2021"
+output: html_document
+---
+
+```{r}
+install.packages('VennDiagram')
+library(VennDiagram)
+setwd("E:/Dades crues Multi-Bio-Targets")
+```
+
+FDR<0.1
+
+Es prepara un arxiu txt amb tots els gens significatius (FDR<0.1) de cada grup.  
+
+```{r}
+base_01 <- read.delim(file.choose(), header = TRUE, sep = "\t")
+A <- base_01$FEMALE
+A <- A[-c(32:214)]
+B <- base_01$MALE
+B <- B[-c(40:214)]
+C <- base_01$DIABETIC
+D <- base_01$OLD
+D <- D[-c(17:214)]
+```
+
+Es creen objectes de la llargada de cada grup.
+
+```{r}
+a1=length(A)
+b1=length(B)
+c1=length(C)
+d1=length(D)
+```
+
+Comparacions 2 a 2
+
+```{r}
+ab=intersect(A, B)
+ab1=length(ab)
+ac=intersect(A, C)
+ac1=length(ac)
+ad=intersect(A, D)
+ad1=length(ad)
+bc=intersect(B, C)
+bc1=length(bc)
+bd=intersect(B, D)
+bd1=length(bd)
+cd=intersect(C, D)
+cd1=length(cd)
+
+```
+
+Comunes a 3 grups
+
+```{r}
+abc=intersect(ab, C)
+abc1=length(abc)
+abd=intersect(ab, D)
+abd1=length(abd)
+acd=intersect(A, cd)
+acd1=length(acd)
+bcd=intersect(bc, D)
+bcd1=length(bcd)
+```
+
+Comunes a tots
+
+```{r}
+abcd=intersect(abc, D)
+abcd1=length(abcd)
+```
+
+Gràfic
+
+```{r}
+pdf()
+draw.quad.venn(a1, b1, c1, d1, ab1, ac1, ad1, bc1, bd1, cd1, abc1, abd1, acd1, bcd1, abcd1, category=c("Female", "Male", "Diabetic", "Old"), fill = c("skyblue", "pink1", "mediumorchid", "orange"), lty = "blank", title="FDR<0.1")
+dev.off()
+```
+
+
+P-valor cru<0.05
+
+Es prepara un arxiu txt amb tots els gens significatius (P-valor cru<0.05) de cada grup.  
+
+```{r}
+base_005 <- read.delim("E:/Dades crues Multi-Bio-Targets/pvalue0.05.txt", header = TRUE, sep = "\t")
+A <- base_005$FEMALE
+A <- A[-c(352:830)]
+B <- base_005$MALE
+B <- B[-c(326:830)]
+C <- base_005$DIABETIC
+D <- base_005$OLD
+D <- D[-c(307:830)]
+```
+
+Es creen objectes de la llargada de cada grup.
+
+```{r}
+a1=length(A)
+b1=length(B)
+c1=length(C)
+d1=length(D)
+```
+
+Comparacions 2 a 2
+
+```{r}
+ab=intersect(A, B)
+ab1=length(ab)
+ac=intersect(A, C)
+ac1=length(ac)
+ad=intersect(A, D)
+ad1=length(ad)
+bc=intersect(B, C)
+bc1=length(bc)
+bd=intersect(B, D)
+bd1=length(bd)
+cd=intersect(C, D)
+cd1=length(cd)
+```
+
+Comunes a 3 grups
+
+```{r}
+abc=intersect(ab, C)
+abc1=length(abc)
+abd=intersect(ab, D)
+abd1=length(abd)
+acd=intersect(A, cd)
+acd1=length(acd)
+bcd=intersect(bc, D)
+bcd1=length(bcd)
+```
+
+Comunes a tots els grups
+
+```{r}
+abcd=intersect(abc, D)
+abcd1=length(abcd)
+```
+
+Gràfic
+
+```{r}
+pdf()
+draw.quad.venn(a1, b1, c1, d1, ab1, ac1, ad1, bc1, bd1, cd1, abc1, abd1, acd1, bcd1, abcd1, category=c("Female", "Male", "Diabetic", "Old"), fill = c("skyblue", "pink1", "mediumorchid", "orange"), lty = "blank", title="raw p-value<0.05")
+dev.off()
+```
+
